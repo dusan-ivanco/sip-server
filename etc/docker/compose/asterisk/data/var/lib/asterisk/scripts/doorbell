@@ -1,0 +1,83 @@
+#!/bin/bash
+
+export PATH="${PATH}:/var/lib/asterisk/scripts/bin"
+
+WAIT="$(($(date +%s) + 60))"
+BASE="$(basename "$0")"
+ROOM="${BASE}_room"
+
+N1="$1"
+N2="$2"
+
+DA=()
+AC=0
+
+trap "stop" EXIT SIGINT SIGTERM
+
+function stop {
+  terminate_ringing
+  cleanup_callroom
+}
+
+function push {
+  curl \
+    -X "GET" \
+    -m "5" \
+    -k "https://hass.domain.tld/api/webhook/sip_notify?state=$1" \
+    -s > /dev/null 2>&1
+}
+
+function originate_channel {
+  while read -r DEVICE; do
+    DEVICE="$(echo ${DEVICE} | jq -r '.uri' | cut -d ';' -f -2)"
+
+    if [[ ! " ${DA[*]} " =~ " ${DEVICE} " ]]; then
+      DA+=("${DEVICE}") ; asterisk -rx "channel originate PJSIP/${N2}/${DEVICE} extension s@${BASE}" &
+    fi
+  done < <(asterisk -rx "database show registrar" | grep -P "^/registrar/contact/${N2}" | grep -P -o '\{.*\}')
+}
+
+function terminate_ringing {
+  while read -r AGENT; do
+    asterisk -rx "channel request hangup ${AGENT}" &
+  done < <(asterisk -rx "core show channels" | grep -P "^PJSIP/${N2}" | grep "Ringing" | awk '{print $1}')
+
+  push cancel
+}
+
+function cleanup_callroom {
+  asterisk -rx "confbridge kick ${ROOM} all"
+}
+
+function inspect_callroom {
+  asterisk -rx "confbridge list ${ROOM}"
+}
+
+push wakeup
+
+while [[ $(date +%s) -le ${WAIT} ]]; do
+  IC="$(inspect_callroom)"
+
+  if [[ $(echo "${IC}" | grep -P -c "^PJSIP/${N1}") -eq 0 ]]; then
+    exit
+  fi
+
+  if [[ $(echo "${IC}" | grep -P -c "^PJSIP/${N2}") -eq 0 ]]; then
+    if [[ ${AC} -eq 0 ]]; then
+      originate_channel
+    fi
+
+    if [[ ${AC} -gt 0 ]]; then
+      exit
+    fi
+  fi
+
+  if [[ $(echo "${IC}" | grep -P -c "^PJSIP/${N2}") -gt 0 ]]; then
+    if [[ ${AC} -eq 0 ]]; then
+      WAIT="$(($(date +%s) + 3600))"
+      terminate_ringing ; ((++AC))
+    fi
+  fi
+
+  sleep 1
+done

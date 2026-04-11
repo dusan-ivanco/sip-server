@@ -1,0 +1,5 @@
+input_boolean:
+  sip_notify:
+    name: SIP Notify
+    icon: mdi:doorbell-video
+    initial: false

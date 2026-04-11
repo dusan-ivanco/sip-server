@@ -1,0 +1,16 @@
+services:
+  coturn:
+    container_name: COTURN
+    image: coturn/coturn:latest
+    hostname: coturn
+    network_mode: host
+    privileged: false
+    volumes:
+      - /etc/certs/base/full.pem:/cert.pem:ro
+      - /etc/certs/base/cert.key:/cert.key:ro
+
+      - ./data/server.conf:/etc/coturn/turnserver.conf:ro
+      - ./data/engine:/var/lib/coturn
+    environment:
+      - TZ=Europe/Bratislava
+    restart: unless-stopped
