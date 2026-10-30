@@ -1,45 +1,36 @@
 - alias: "SIP Notify"
   id: "SIP Notify"
   max_exceeded: silent
-  mode: single
-
-  variables:
-    state: "{{ trigger.query.state }}"
-    title: "Doorbell"
-    message: "Someone at the door"
+  mode: queued
 
   triggers:
   - trigger: webhook
     webhook_id: sip_notify
-    local_only: false
+    local_only: true
     allowed_methods:
     - GET
 
   actions:
   - if:
     - condition: template
-      value_template: "{{ state == 'wakeup' }}"
+      value_template: "{{ trigger.query.state == 'wakeup' }}"
+
     then:
-    - action: camera.snapshot
-      target:
-        entity_id: camera.doorbell
-      data:
-        filename: /media/doorbell.jpg
     - parallel:
       - action: input_boolean.turn_on
         target:
           entity_id: input_boolean.sip_notify
       - action: notify.user
         data:
-          title: "{{ title }}"
-          message: "{{ message }}"
+          title: Doorbell
+          message: Someone at the door
           data:
             tag: Doorbell
             channel: Doorbell
 
             url: /lovelace/doorbell
             clickAction: /lovelace/doorbell
-            image: /media/local/doorbell.jpg
+            image: /api/camera_proxy/camera.doorbell
 
             timeout: 30
             importance: high
@@ -52,11 +43,13 @@
               interruption-level: time-sensitive
               sound:
                 name: ringing.wav
+
     else:
     - if:
       - condition: state
         entity_id: input_boolean.sip_notify
         state: "on"
+
       then:
       - parallel:
         - action: input_boolean.turn_off
