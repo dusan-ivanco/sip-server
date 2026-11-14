@@ -12,6 +12,8 @@ services:
       - ./data/var/lib/asterisk/moh:/var/lib/asterisk/moh:ro
       - ./data/var/lib/asterisk/agi-bin:/var/lib/asterisk/agi-bin:ro
       - ./data/var/lib/asterisk/scripts:/var/lib/asterisk/scripts:ro
+
+      - ./data/var/lib/asterisk/astdb.sqlite3:/var/lib/asterisk/astdb.sqlite3
     environment:
       - TZ=Europe/Bratislava
     restart: unless-stopped
