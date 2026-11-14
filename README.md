@@ -23,8 +23,8 @@ It is the companion to [sip-doorbell](https://github.com/dusan-ivanco/sip-doorbe
 1. The intercom (endpoint `999`, TLS) dials a three-digit extension, here `001`.
 2. The dialplan (`[default]`, `_XXX`) answers and puts the intercom into the ConfBridge room `doorbell_room`. The room uses SFU video, and the intercom hears music on hold while it is alone. The dialplan then starts the `doorbell` script in the background with the caller number and the dialled extension as arguments.
 3. The script:
-   - calls the HA webhook with `state=wakeup`;
-   - reads every registered contact of the dialled extension from the Asterisk registrar (up to 25 per AOR, one per open card) and originates a call to each one into the context `[doorbell]`, which joins the same room.
+   - calls the HA webhook with `state=wakeup` (`curl -k`, so the HA certificate is not verified);
+   - reads every registered contact of the dialled extension from the Asterisk registrar (up to 30 for the AOR `001`, one per open card) and originates a call to each one into the context `[doorbell]`, which joins the same room.
 4. The first panel that answers joins the room. The script hangs up the panels that are still ringing and calls the webhook with `state=cancel`.
 5. The script ends and clears the room when:
    - the intercom leaves;
@@ -38,20 +38,23 @@ The repository mirrors the target file system, so files are copied to the same p
 
 | Path | Purpose |
 |------|---------|
-| `etc/docker/compose/asterisk/docker-compose.yml` | Asterisk 22 (`andrius/asterisk:22`), host network, runs as UID/GID 1000 |
-| `…/asterisk/data/etc/asterisk/pjsip.conf` | Transports (UDP/TCP 5060, TLS 5061, WSS), NAT settings and endpoints `001` and `999` |
+| `etc/docker/compose/asterisk/docker-compose.yml` | Asterisk 22 (`andrius/asterisk:22`), host network, configuration, music on hold and scripts mounted read-only, log rotation (2 × 10 MB) |
+| `…/asterisk/data/etc/asterisk/pjsip.conf` | Transports (UDP/TCP 5060 and TLS 5061 on IPv4 and IPv6, WSS), NAT settings and endpoints `001` and `999` |
 | `…/asterisk/data/etc/asterisk/http.conf` | HTTP server for the WebSocket: `8088` (plain) and `8089` (TLS) |
 | `…/asterisk/data/etc/asterisk/extensions.conf` | Dialplan (contexts `default` and `doorbell`) |
 | `…/asterisk/data/etc/asterisk/confbridge.conf` | Profiles `doorbell_bridge` (SFU video, no join/leave sounds), `doorbell_device` (music on hold when alone), `doorbell_agents` |
-| `…/asterisk/data/etc/asterisk/rtp.conf` | RTP range `10000–11000` and ICE host candidate mapping (private → public IP) |
-| `…/asterisk/data/etc/asterisk/modules.conf` | Autoload with unused modules disabled (ARI, voicemail, queues, CDR/CEL backends, …) |
+| `…/asterisk/data/etc/asterisk/rtp.conf` | RTP range `10000–11000`, ICE candidates limited to the host's private and public IP, host candidate mapping (private → public IP) |
+| `…/asterisk/data/etc/asterisk/modules.conf` | Autoload with unused modules disabled (ARI, AMI, voicemail, queues, CDR/CEL, ODBC, …) |
+| `…/asterisk/data/etc/asterisk/indications.conf` | Slovak call progress tones |
+| `…/asterisk/data/etc/asterisk/cdr.conf`, `logger.conf` | CDR disabled, log to the console only (no log files) |
+| other `…/etc/asterisk/*.conf` | Defaults or intentionally empty files, so Asterisk does not complain about missing configuration |
 | `…/asterisk/data/var/lib/asterisk/scripts/doorbell` | Ring-all, cleanup and webhook script |
 | `…/asterisk/data/var/lib/asterisk/scripts/bin/jq` | Static `jq` binary used by the script (**Linux ARM64**). Replace it on other architectures. |
 | `…/asterisk/data/var/lib/asterisk/moh/simplicity.wav` | Music on hold played to the intercom while it waits |
-| `etc/docker/compose/coturn/docker-compose.yml` | coturn (`coturn/coturn:latest`), host network |
-| `etc/docker/compose/coturn/data/server.conf` | coturn configuration (relay ports `12000–13000`) and bootstrap commands |
+| `etc/docker/compose/coturn/docker-compose.yml` | coturn (`coturn/coturn:latest`), host network, user database in `data/engine`, log rotation (2 × 10 MB) |
+| `etc/docker/compose/coturn/data/server.conf` | coturn configuration (relay ports `20000–21000`, web admin on `127.0.0.1:9000`) and bootstrap commands |
 | `etc/certs/base/` | Empty placeholders for the TLS certificate (`full.pem`, full chain) and key (`cert.key`). Asterisk and coturn share them. |
-| `etc/nftables.conf` | Firewall rules |
+| `etc/nftables.conf` | Firewall rules (input policy `drop`) |
 | `etc/systemd/system/asterisk.service`, `coturn.service` | systemd units that run `docker compose up -d` / `down` |
 | `var/Home Assistant/*.sample` | HA `input_boolean` and webhook automation |
 
@@ -78,12 +81,13 @@ Put your certificate chain and key in `/etc/certs/base/full.pem` and `/etc/certs
 
 | File | What to set |
 |------|-------------|
-| `pjsip.conf` | `external_media_address` and `external_signaling_address` (public IP, `1.2.3.4`); `local_net` (your private ranges); `from_domain`; the `password` of `001` and `999` |
-| `rtp.conf` | `[ice_host_candidates]`: map the private IP of the host (`10.20.30.40`) to the public IP |
+| `pjsip.conf` | `external_media_address` and `external_signaling_address` (public IP, `1.2.3.4`); `local_net` (your private ranges); `from_domain`; the `password` and `callerid` of `001` and `999` |
+| `rtp.conf` | `ice_permit` (private and public IP of the host); `[ice_host_candidates]`: map the private IP (`10.20.30.40`) to the public IP |
 | `scripts/doorbell` | Home Assistant webhook URL (`https://hass.domain.tld/api/webhook/sip_notify`) |
-| `coturn/data/server.conf` | `listening-ip`, `realm`, `cli-password` |
+| `coturn/data/server.conf` | `listening-ip` and `relay-ip` (private IP); `external-ip` (`public/private`); `realm`; `cli-password` |
+| both `docker-compose.yml` | `TZ` (default `Europe/Bratislava`) |
 
-The endpoint `001` is the WebRTC account the cards use (transport `wss-ipv4`, `webrtc = yes`). The endpoint `999` is the intercom (transport `tls-ipv4`). To add another group of panels or another intercom, copy the `aor`/`auth`/`endpoint` sections. Any three-digit extension works with the dialplan.
+The endpoint `001` is the WebRTC account the cards use (transport `wss`, `webrtc = yes`, up to 30 contacts, no qualify). The endpoint `999` is the intercom (transport `tls-ipv4`, one contact, qualified every 30 s). Registering again replaces the old contact (`remove_existing`). To add another group of panels or another intercom, copy the `aor`/`auth`/`endpoint` sections. Any three-digit extension works with the dialplan.
 
 ### 3. Initialise coturn
 
@@ -110,13 +114,17 @@ Ports opened by `nftables.conf`:
 | Port | Protocol | Service |
 |------|----------|---------|
 | 22 | TCP | SSH |
+| 8089 | TCP | Asterisk WebSocket (WSS) |
 | 5060 | UDP/TCP | SIP |
 | 5061 | TCP | SIP over TLS |
-| 3478, 5349 | UDP/TCP | STUN/TURN (plain and TLS) |
+| 3478 | UDP/TCP | STUN/TURN |
+| 5349 | TCP | TURN over TLS |
 | 10000–11000 | UDP | Asterisk RTP |
-| 12000–13000 | UDP | coturn relay |
+| 20000–21000 | UDP | coturn relay |
 
-> The WebSocket port (`8089`) is **not** opened by `nftables.conf`. Either add it, or put a reverse proxy in front of Asterisk and point the card at `wss://sip.domain.tld/ws`.
+The card connects to `wss://sip.domain.tld:8089/ws`. If you put a reverse proxy in front of Asterisk instead, point the card at the proxy and you can close `8089`. The plain HTTP port `8088` and the coturn web admin (`9000`, localhost only) stay closed.
+
+The Asterisk configuration is mounted read-only. After you edit it on the host, reload it with `docker exec ASTERISK asterisk -rx "core reload"` or restart the service.
 
 ### 5. Home Assistant
 
@@ -138,7 +146,7 @@ Install [sip-doorbell](https://github.com/dusan-ivanco/sip-doorbell) and configu
 type: custom:sip-doorbell
 server:
   sip:
-    url: wss://sip.domain.tld/ws
+    url: wss://sip.domain.tld:8089/ws
     username: 001@sip.domain.tld
     credential: secret
   ice:
@@ -151,7 +159,7 @@ camera: camera.doorbell
 
 ## Troubleshooting
 
-Open the Asterisk console with `docker exec -it ASTERISK asterisk -rvvv`. Useful commands:
+Logs go to the container output only: `docker logs -f ASTERISK` and `docker logs -f COTURN`. Open the Asterisk console with `docker exec -it ASTERISK asterisk -rvvv`. Useful commands:
 
 | Command | Shows |
 |---------|-------|
@@ -164,6 +172,6 @@ Open the Asterisk console with `docker exec -it ASTERISK asterisk -rvvv`. Useful
 Common problems:
 
 - **Card does not register**: the WSS port is not reachable, the certificate is invalid for the domain, or the password is wrong.
-- **Call connects but no audio or video**: NAT. Check `external_*_address`, the `rtp.conf` ICE mapping, the TURN credentials in the card and the UDP ranges `10000–11000` (Asterisk) and `12000–13000` (coturn).
+- **Call connects but no audio or video**: NAT. Check `external_*_address`, the `rtp.conf` ICE mapping, the TURN credentials in the card and the UDP ranges `10000–11000` (Asterisk) and `20000–21000` (coturn).
 - **No push notification**: run the script's `curl` from the host by hand and check the HA log for the webhook and the `local_only` setting.
 - **Script fails with `jq: cannot execute`**: the bundled `jq` is for ARM64. Replace it with a binary for your architecture.
