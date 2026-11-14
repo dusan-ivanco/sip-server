@@ -4,20 +4,19 @@ services:
     image: andrius/asterisk:22
     hostname: asterisk
     network_mode: host
-    privileged: false
     volumes:
       - /etc/certs/base/full.pem:/cert.pem:ro
       - /etc/certs/base/cert.key:/cert.key:ro
 
-      - ./data/etc/asterisk:/etc/asterisk
-#     - ./data/var/log/asterisk:/var/log/asterisk
-      - ./data/var/spool/asterisk:/var/spool/asterisk
-
-      - ./data/var/lib/asterisk/moh:/var/lib/asterisk/moh
-      - ./data/var/lib/asterisk/scripts:/var/lib/asterisk/scripts
-      - ./data/var/lib/asterisk/sounds:/var/lib/asterisk/sounds
+      - ./data/etc/asterisk:/etc/asterisk:ro
+      - ./data/var/lib/asterisk/moh:/var/lib/asterisk/moh:ro
+      - ./data/var/lib/asterisk/agi-bin:/var/lib/asterisk/agi-bin:ro
+      - ./data/var/lib/asterisk/scripts:/var/lib/asterisk/scripts:ro
     environment:
       - TZ=Europe/Bratislava
-      - ASTERISK_UID=1000
-      - ASTERISK_GID=1000
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-file: "2"
+        max-size: "10m"

@@ -12,7 +12,8 @@ N2="$2"
 DA=()
 AC=0
 
-trap "stop" EXIT SIGINT SIGTERM
+trap "stop" EXIT
+trap "exit" SIGINT SIGTERM
 
 function stop {
   terminate_ringing
@@ -29,7 +30,7 @@ function push {
 
 function originate_channel {
   while read -r DEVICE; do
-    DEVICE="$(echo ${DEVICE} | jq -r '.uri' | cut -d ';' -f -2)"
+    DEVICE="$(echo "${DEVICE}" | jq -r '.uri' | cut -d ';' -f -2)"
 
     if [[ ! " ${DA[*]} " =~ " ${DEVICE} " ]]; then
       DA+=("${DEVICE}") ; asterisk -rx "channel originate PJSIP/${N2}/${DEVICE} extension s@${BASE}" &

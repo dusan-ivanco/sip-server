@@ -4,7 +4,6 @@ services:
     image: coturn/coturn:latest
     hostname: coturn
     network_mode: host
-    privileged: false
     volumes:
       - /etc/certs/base/full.pem:/cert.pem:ro
       - /etc/certs/base/cert.key:/cert.key:ro
@@ -14,3 +13,8 @@ services:
     environment:
       - TZ=Europe/Bratislava
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-file: "2"
+        max-size: "10m"
